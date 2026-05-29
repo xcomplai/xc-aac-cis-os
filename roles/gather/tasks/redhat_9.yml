@@ -1,0 +1,127 @@
+---
+# CIS Red Hat Enterprise Linux 9 v2.0.0 — distro-specific gather tasks.
+# Dispatched from roles/gather/tasks/main.yml when ansible_distribution is
+# RedHat and ansible_distribution_major_version is 9.
+
+- name: Initialise framework_facts accumulator
+  ansible.builtin.set_fact:
+    framework_facts: {}
+
+# ── Filesystem ────────────────────────────────────────────────────────────────
+- name: Gather package facts (input to many CIS controls)
+  ansible.builtin.package_facts:
+    manager: auto
+  when: cis_rhel9_gather_package_facts | bool
+
+- name: Gather yum/dnf repo configuration
+  ansible.builtin.find:
+    paths: /etc/yum.repos.d
+    patterns: "*.repo"
+  register: _yum_repos
+  changed_when: false
+
+- name: Read yum/dnf repo files
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ _yum_repos.files }}"
+  register: _yum_repo_contents
+  changed_when: false
+  when: _yum_repos.files | length > 0
+
+- name: Project filesystem facts
+  ansible.builtin.set_fact:
+    framework_facts: "{{ framework_facts | combine({'filesystem': _fs}) }}"
+  vars:
+    _fs:
+      auto_updates_enabled: "{{ 'dnf-automatic' in (ansible_facts.packages | default({})) }}"
+      yum_repos: >-
+        {{ _yum_repo_contents.results | default([])
+           | map(attribute='content') | map('b64decode') | list }}
+      gpg_keys_present: "{{ lookup('fileglob', '/etc/pki/rpm-gpg/*', errors='ignore') | length > 0 }}"
+
+# ── SSH ──────────────────────────────────────────────────────────────────────
+- name: Read sshd_config (best-effort)
+  ansible.builtin.slurp:
+    src: /etc/ssh/sshd_config
+  register: _sshd_config
+  changed_when: false
+  failed_when: false
+
+- name: Project ssh facts
+  ansible.builtin.set_fact:
+    framework_facts: "{{ framework_facts | combine({'ssh': _ssh}) }}"
+  vars:
+    _config_text: "{{ (_sshd_config.content | default('')) | b64decode }}"
+    _ssh:
+      sshd_config_present: "{{ _sshd_config.content is defined }}"
+      sshd_config_raw: "{{ _config_text }}"
+      permit_root_login: >-
+        {{ (_config_text | regex_search('(?im)^\\s*PermitRootLogin\\s+(\\S+)', '\\1') | first) | default('') }}
+      permit_empty_passwords: >-
+        {{ (_config_text | regex_search('(?im)^\\s*PermitEmptyPasswords\\s+(\\S+)', '\\1') | first) | default('') }}
+      protocol: >-
+        {{ (_config_text | regex_search('(?im)^\\s*Protocol\\s+(\\S+)', '\\1') | first) | default('') }}
+
+# ── SELinux ──────────────────────────────────────────────────────────────────
+- name: Project selinux facts
+  ansible.builtin.set_fact:
+    framework_facts: "{{ framework_facts | combine({'selinux': _se}) }}"
+  vars:
+    _se:
+      status: "{{ ansible_facts['selinux']['status'] | default('disabled') }}"
+      mode: "{{ ansible_facts['selinux']['mode'] | default('') }}"
+      type: "{{ ansible_facts['selinux']['type'] | default('') }}"
+      policy_version: "{{ ansible_facts['selinux']['policyvers'] | default('') }}"
+
+# ── Services + service manager ───────────────────────────────────────────────
+- name: List running systemd services
+  ansible.builtin.service_facts:
+  changed_when: false
+
+- name: Project services facts
+  ansible.builtin.set_fact:
+    framework_facts: "{{ framework_facts | combine({'services': _svc}) }}"
+  vars:
+    _svc:
+      service_mgr: "{{ ansible_facts['service_mgr'] | default('') }}"
+      running: >-
+        {{ ansible_facts['services'] | default({})
+           | dict2items
+           | selectattr('value.state', 'equalto', 'running')
+           | map(attribute='key') | list }}
+      enabled: >-
+        {{ ansible_facts['services'] | default({})
+           | dict2items
+           | selectattr('value.status', 'equalto', 'enabled')
+           | map(attribute='key') | list }}
+
+# ── Filesystem permissions (representative subset; full coverage TBD) ────────
+- name: Stat /etc/passwd, /etc/shadow, /etc/group permissions
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/passwd
+    - /etc/shadow
+    - /etc/group
+    - /etc/gshadow
+  register: _critical_files
+  changed_when: false
+
+- name: Project filesystem_permissions facts
+  ansible.builtin.set_fact:
+    framework_facts: "{{ framework_facts | combine({'filesystem_permissions': _fp}) }}"
+  vars:
+    _fp:
+      paths: >-
+        {{ _critical_files.results
+           | map('combine', {})
+           | map('json_query', "{path: invocation.module_args.path, mode: stat.mode, owner: stat.pw_name, group: stat.gr_name, exists: stat.exists}")
+           | list }}
+
+# ── Gather summary ───────────────────────────────────────────────────────────
+- name: Gather summary
+  ansible.builtin.debug:
+    msg:
+      - "xcomplai.cis_rhel9.gather complete"
+      - "framework_facts nouns gathered: {{ framework_facts.keys() | list | join(', ') }}"
+      - "(Subsequent minor releases extend to auth/audit/pam/sudo/network/cron/boot_security/initial_setup/logging/user_group.)"
