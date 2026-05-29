@@ -1,3 +1,16 @@
+> # ⚠️ RETIRED / DEPRECATED — 2026-05-29
+>
+> **`xcomplai.cis_os` is retired.** Its framework-agnostic Linux fact-gathering
+> was generalized into **[`xcomplai.aac_common`](https://github.com/xcomplai/xc-aac-common)**
+> under the AAC "decoupled-gather" end state: ONE Linux gatherer, with frameworks
+> (CIS / STIG / NIST / …) living purely as OPA rego. All new work happens there;
+> the core EE (`xc-aac-ee` v2.3.0+) ships `aac_common`, not `cis_os`.
+>
+> This repo is archived (read-only). The **`v1.2.0`** release is kept for history.
+> See **[xcomplai/xc-aac](https://github.com/xcomplai/xc-aac)** for the current architecture.
+
+---
+
 # xcomplai.cis_os
 
 Ansible Collection: CIS Operating Systems benchmark fact gathering + OPA assessment wrapper.
