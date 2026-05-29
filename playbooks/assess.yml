@@ -40,6 +40,9 @@
     # Per-target dispatch: cis_os_target_key (set by gather role) → CIS
     # framework key + CIS spec version. Operator can override framework via -e.
     cis_os_target_map:
+      redhat_8:
+        framework: cis_rhel8
+        framework_version: '3.0.0'
       redhat_9:
         framework: cis_rhel9
         framework_version: '2.0.0'

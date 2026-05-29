@@ -47,6 +47,7 @@
     # Targets shipped in this collection release. Each entry must have a
     # matching tasks/<key>.yml. Sorted for grep convenience.
     _cis_os_supported_targets:
+      - redhat_8
       - redhat_9
 
 - name: Dispatch to per-target gather tasks
