@@ -1,150 +1,59 @@
 ---
-# xcomplai.cis_rhel9.gather — produce framework_facts for CIS RHEL 9 v2.0.0.
+# xcomplai.cis_os.gather — produce framework_facts for the CIS Operating
+# Systems benchmark family.
+#
+# Single role per CIS benchmark SCOPE (per Tier 3.K scoping); per-target
+# implementation dispatched via include_tasks based on the target host's
+# distribution + version. Each per-target task file is independently
+# versioned via the collection's overall semver.
 #
 # Output: sets `framework_facts` host fact in the fact_contract/v1 shape.
-# The caller (typically playbooks/assess.yml in this collection, or
-# xc-aac's generic_framework_assessment.yml in the orchestration layer)
-# combines it with ansible_facts + metadata into the OPA input.
+# See xcomplai/xc-aac:docs/architecture/FACT_CONTRACT.md for the contract.
 #
-# This role does NOT POST to OPA and does NOT store results to PG. That's
-# the assess wrapper's job. Gather is read-only fact projection.
-#
-# Status: v1.0.0 — initial scaffolding. Covers the same fact shape as the
-# pre-collection cis_rhel9_assessment.yml in xcomplai/xc-aac plus a
-# representative subset of the 14-section enhanced collection. Remaining
-# sections (auth, audit, pam, sudo, …) ship in subsequent minor versions —
-# the rego library validates against whatever's present (missing nouns
-# return undefined and rego rules degrade gracefully).
-
-- name: Assert we're on a supported platform
-  ansible.builtin.assert:
-    that:
-      - ansible_facts['distribution'] | default('') == 'RedHat'
-      - ansible_facts['distribution_major_version'] | default('') == '9'
-    fail_msg: >-
-      xcomplai.cis_rhel9.gather targets RHEL 9. Got
-      {{ ansible_facts['distribution'] | default('?') }}
-      {{ ansible_facts['distribution_major_version'] | default('?') }}.
+# Status: v1.1.0 — refactored from v1.0.0's single-distro shape into the
+# scoped collection model. RHEL 9 logic moved to tasks/redhat_9.yml. Other
+# distros added in subsequent minor releases (each adds a tasks/<distro>.yml
+# + extends the supported-targets dispatch list below).
 
 - name: Initialise framework_facts accumulator
   ansible.builtin.set_fact:
     framework_facts: {}
 
-# ── Filesystem ────────────────────────────────────────────────────────────────
-- name: Gather package facts (input to many CIS controls)
-  ansible.builtin.package_facts:
-    manager: auto
-  when: cis_rhel9_gather_package_facts | bool
-
-- name: Gather yum/dnf repo configuration
-  ansible.builtin.find:
-    paths: /etc/yum.repos.d
-    patterns: "*.repo"
-  register: _yum_repos
-  changed_when: false
-
-- name: Read yum/dnf repo files
-  ansible.builtin.slurp:
-    src: "{{ item.path }}"
-  loop: "{{ _yum_repos.files }}"
-  register: _yum_repo_contents
-  changed_when: false
-  when: _yum_repos.files | length > 0
-
-- name: Project filesystem facts
+# Compose the dispatch key from gathered facts. Operators can override by
+# setting `cis_os_target_key` explicitly (useful for in-progress / alpha
+# variants that don't auto-derive cleanly).
+- name: Resolve per-target dispatch key
   ansible.builtin.set_fact:
-    framework_facts: "{{ framework_facts | combine({'filesystem': _fs}) }}"
+    cis_os_target_key: >-
+      {{ cis_os_target_key | default(
+        ((ansible_facts['distribution'] | lower)
+          | replace(' ', '_')
+          | regex_replace('^red[_ -]?hat$', 'redhat'))
+        + '_' +
+        (ansible_facts['distribution_major_version'] | string)
+      ) }}
+
+- name: Assert the target is supported by this collection version
+  ansible.builtin.assert:
+    that:
+      - cis_os_target_key in _cis_os_supported_targets
+    fail_msg: >-
+      xcomplai.cis_os v{{ ansible_collection_version | default('?') }} does
+      not yet ship gather logic for target '{{ cis_os_target_key }}'.
+      Supported in this release: {{ _cis_os_supported_targets | join(', ') }}.
+      To extend: add roles/gather/tasks/{{ cis_os_target_key }}.yml + open
+      a PR against xcomplai/xc-aac-cis-os.
   vars:
-    _fs:
-      auto_updates_enabled: "{{ 'dnf-automatic' in (ansible_facts.packages | default({})) }}"
-      yum_repos: >-
-        {{ _yum_repo_contents.results | default([])
-           | map(attribute='content') | map('b64decode') | list }}
-      gpg_keys_present: "{{ lookup('fileglob', '/etc/pki/rpm-gpg/*', errors='ignore') | length > 0 }}"
+    # Targets shipped in this collection release. Each entry must have a
+    # matching tasks/<key>.yml. Sorted for grep convenience.
+    _cis_os_supported_targets:
+      - redhat_9
 
-# ── SSH ──────────────────────────────────────────────────────────────────────
-- name: Read sshd_config (best-effort)
-  ansible.builtin.slurp:
-    src: /etc/ssh/sshd_config
-  register: _sshd_config
-  changed_when: false
-  failed_when: false
+- name: Dispatch to per-target gather tasks
+  ansible.builtin.include_tasks: "{{ cis_os_target_key }}.yml"
 
-- name: Project ssh facts
-  ansible.builtin.set_fact:
-    framework_facts: "{{ framework_facts | combine({'ssh': _ssh}) }}"
-  vars:
-    _config_text: "{{ (_sshd_config.content | default('')) | b64decode }}"
-    _ssh:
-      sshd_config_present: "{{ _sshd_config.content is defined }}"
-      sshd_config_raw: "{{ _config_text }}"
-      permit_root_login: >-
-        {{ (_config_text | regex_search('(?im)^\\s*PermitRootLogin\\s+(\\S+)', '\\1') | first) | default('') }}
-      permit_empty_passwords: >-
-        {{ (_config_text | regex_search('(?im)^\\s*PermitEmptyPasswords\\s+(\\S+)', '\\1') | first) | default('') }}
-      protocol: >-
-        {{ (_config_text | regex_search('(?im)^\\s*Protocol\\s+(\\S+)', '\\1') | first) | default('') }}
-
-# ── SELinux ──────────────────────────────────────────────────────────────────
-- name: Project selinux facts
-  ansible.builtin.set_fact:
-    framework_facts: "{{ framework_facts | combine({'selinux': _se}) }}"
-  vars:
-    _se:
-      status: "{{ ansible_facts['selinux']['status'] | default('disabled') }}"
-      mode: "{{ ansible_facts['selinux']['mode'] | default('') }}"
-      type: "{{ ansible_facts['selinux']['type'] | default('') }}"
-      policy_version: "{{ ansible_facts['selinux']['policyvers'] | default('') }}"
-
-# ── Services + service manager ───────────────────────────────────────────────
-- name: List running systemd services
-  ansible.builtin.service_facts:
-  changed_when: false
-
-- name: Project services facts
-  ansible.builtin.set_fact:
-    framework_facts: "{{ framework_facts | combine({'services': _svc}) }}"
-  vars:
-    _svc:
-      service_mgr: "{{ ansible_facts['service_mgr'] | default('') }}"
-      running: >-
-        {{ ansible_facts['services'] | default({})
-           | dict2items
-           | selectattr('value.state', 'equalto', 'running')
-           | map(attribute='key') | list }}
-      enabled: >-
-        {{ ansible_facts['services'] | default({})
-           | dict2items
-           | selectattr('value.status', 'equalto', 'enabled')
-           | map(attribute='key') | list }}
-
-# ── Filesystem permissions (representative subset; full coverage TBD) ────────
-- name: Stat /etc/passwd, /etc/shadow, /etc/group permissions
-  ansible.builtin.stat:
-    path: "{{ item }}"
-  loop:
-    - /etc/passwd
-    - /etc/shadow
-    - /etc/group
-    - /etc/gshadow
-  register: _critical_files
-  changed_when: false
-
-- name: Project filesystem_permissions facts
-  ansible.builtin.set_fact:
-    framework_facts: "{{ framework_facts | combine({'filesystem_permissions': _fp}) }}"
-  vars:
-    _fp:
-      paths: >-
-        {{ _critical_files.results
-           | map('combine', {})
-           | map('json_query', "{path: invocation.module_args.path, mode: stat.mode, owner: stat.pw_name, group: stat.gr_name, exists: stat.exists}")
-           | list }}
-
-# ── Gather summary ───────────────────────────────────────────────────────────
 - name: Gather summary
   ansible.builtin.debug:
     msg:
-      - "xcomplai.cis_rhel9.gather complete"
+      - "xcomplai.cis_os.gather complete — target: {{ cis_os_target_key }}"
       - "framework_facts nouns gathered: {{ framework_facts.keys() | list | join(', ') }}"
-      - "(Subsequent minor releases extend to auth/audit/pam/sudo/network/cron/boot_security/initial_setup/logging/user_group.)"

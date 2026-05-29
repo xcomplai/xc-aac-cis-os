@@ -1,12 +1,12 @@
 ---
 namespace: xcomplai
-name: cis_rhel9
-version: 1.0.0
+name: cis_os
+version: 1.1.0
 readme: README.md
 authors:
   - Lane Inman <oliinman@xcomplai.ai>
 description: >-
-  CIS Red Hat Enterprise Linux 9 v2.0.0 fact gathering + OPA assessment
+  CIS Operating Systems benchmark fact gathering + OPA assessment
   wrapper. Implements the fact_contract/v1 wire shape for the Ansible
   Automated Compliance (AAC) framework-collection architecture — the
   gather role projects host data into the input shape OPA's CIS RHEL 9
@@ -21,10 +21,10 @@ tags:
   - opa
   - security
 dependencies: {}
-repository: https://github.com/xcomplai/xc-aac-cis-rhel9
-documentation: https://github.com/xcomplai/xc-aac-cis-rhel9
+repository: https://github.com/xcomplai/xc-aac-cis-os
+documentation: https://github.com/xcomplai/xc-aac-cis-os
 homepage: https://github.com/xcomplai/xc-aac
-issues: https://github.com/xcomplai/xc-aac-cis-rhel9/issues
+issues: https://github.com/xcomplai/xc-aac-cis-os/issues
 build_ignore:
   - .github
   - .gitignore

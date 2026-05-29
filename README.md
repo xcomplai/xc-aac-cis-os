@@ -1,6 +1,6 @@
-# xcomplai.cis_rhel9
+# xcomplai.cis_os
 
-Ansible Collection: CIS Red Hat Enterprise Linux 9 v2.0.0 fact gathering + OPA assessment wrapper.
+Ansible Collection: CIS Operating Systems benchmark fact gathering + OPA assessment wrapper.
 
 First reference implementation of the **fact_contract/v1** framework-collection pattern documented at [xcomplai/xc-aac → docs/architecture/FACT_CONTRACT.md](https://github.com/xcomplai/xc-aac/blob/main/docs/architecture/FACT_CONTRACT.md).
 
@@ -15,10 +15,10 @@ First reference implementation of the **fact_contract/v1** framework-collection 
 
 ```bash
 # From Galaxy (when published):
-ansible-galaxy collection install xcomplai.cis_rhel9
+ansible-galaxy collection install xcomplai.cis_os
 
 # From this repo (until first release):
-ansible-galaxy collection install git+https://github.com/xcomplai/xc-aac-cis-rhel9.git
+ansible-galaxy collection install git+https://github.com/xcomplai/xc-aac-cis-os.git
 ```
 
 ## Use
@@ -39,7 +39,7 @@ The orchestration layer in [xc-aac](https://github.com/xcomplai/xc-aac) will eve
 
 ```bash
 ansible-playbook -i hosts \
-  xcomplai.cis_rhel9.assess \
+  xcomplai.cis_os.assess \
   -e opa_server_url=http://aac-host:8181 \
   -e compliance_db_password=<vault-secret>
 ```
@@ -84,7 +84,7 @@ The rego library at [ynotbhatc/rego_policy_libraries](https://github.com/ynotbha
   "input": {
     "ansible_facts": { /* setup-gathered, projected to the contract's standard subset */ },
     "framework_facts": {
-      "filesystem":    { /* xcomplai.cis_rhel9.gather sets these */ },
+      "filesystem":    { /* xcomplai.cis_os.gather sets these */ },
       "ssh":           { /* ... */ },
       "selinux":       { /* ... */ },
       "services":      { /* ... */ },
@@ -94,7 +94,7 @@ The rego library at [ynotbhatc/rego_policy_libraries](https://github.com/ynotbha
       "inventory_hostname": "...",
       "framework": "cis_rhel9",
       "framework_version": "2.0.0",
-      "collection": "xcomplai.cis_rhel9",
+      "collection": "xcomplai.cis_os",
       "collection_version": "1.0.0",
       "gathered_at": "2026-05-29T..."
     }
@@ -106,7 +106,7 @@ Posted to OPA at the path declared in the rego library's `data.cis_rhel9.metadat
 
 ## Repo
 
-Source: https://github.com/xcomplai/xc-aac-cis-rhel9 — issues, PRs, releases.
+Source: https://github.com/xcomplai/xc-aac-cis-os — issues, PRs, releases.
 
 Pairs with:
 - [xcomplai/xc-aac](https://github.com/xcomplai/xc-aac) — orchestration / chart / install.

@@ -3,8 +3,8 @@ galaxy_info:
   role_name: gather
   author: Lane Inman
   description: >-
-    Project CIS RHEL 9 v2.0.0 host facts into the fact_contract/v1
-    `framework_facts` shape consumed by the cis_rhel9.* rego library.
+    Project CIS Operating Systems host facts into the fact_contract/v1
+    `framework_facts` shape consumed by the cis_<target>.* rego library (per-distro dispatch).
   license: MIT
   min_ansible_version: '2.16'
   platforms:

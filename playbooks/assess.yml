@@ -1,10 +1,15 @@
 ---
-# xcomplai.cis_rhel9.assess — thin wrapper: gather → POST OPA → store PG.
+# xcomplai.cis_os.assess — thin wrapper: gather → POST OPA → store PG.
 #
 # Per fact_contract/v1: gather sets framework_facts; this playbook composes
 # ansible_facts + framework_facts + metadata into the OPA input, queries OPA
-# at the cis_rhel9 endpoint, then writes results to the compliance_results
-# table.
+# at the per-target framework endpoint, then writes results to the
+# compliance_results table.
+#
+# The collection covers all CIS Operating Systems benchmarks. The per-target
+# framework key + OPA endpoint are derived from the gather role's resolved
+# `cis_os_target_key` via a lookup table; operators can override either by
+# passing them as extra-vars.
 #
 # Today this playbook inlines the OPA query + PG store logic. When
 # xcomplai.aac_common.evaluate lands (Tier 3 follow-on), the include_role
@@ -16,28 +21,39 @@
 #   compliance_db_password   PostgreSQL postgres user password
 #
 # Optional:
+#   framework                Override the auto-derived framework key.
+#   cis_os_target_key        Override target dispatch (alpha distros / pre-release).
 #   pg_host (default 'aac-host'), pg_port (5433), pg_db ('compliance')
 
-- name: CIS RHEL 9 — gather + assess
+- name: CIS OS — gather + assess
   hosts: "{{ assess_hosts | default('all') }}"
   gather_facts: true
 
   vars:
-    framework: cis_rhel9
-    framework_version: '2.0.0'
-    collection_self: xcomplai.cis_rhel9
-    collection_self_version: '1.0.0'
+    collection_self: xcomplai.cis_os
+    collection_self_version: '1.1.0'
     opa_input_schema: fact_contract/v1
-    opa_endpoint_path: /v1/data/cis_rhel9/main/compliance_report
     pg_table: compliance_results
     pg_host: "{{ pg_host | default('aac-host') }}"
     pg_port: "{{ pg_port | default(5433) }}"
     pg_db: "{{ pg_db | default('compliance') }}"
+    # Per-target dispatch: cis_os_target_key (set by gather role) → CIS
+    # framework key + CIS spec version. Operator can override framework via -e.
+    cis_os_target_map:
+      redhat_9:
+        framework: cis_rhel9
+        framework_version: '2.0.0'
 
   tasks:
-    - name: Gather CIS RHEL 9 framework_facts
+    - name: Gather CIS OS framework_facts (per-target dispatch)
       ansible.builtin.include_role:
         name: gather
+
+    - name: Resolve framework key + OPA endpoint for the gathered target
+      ansible.builtin.set_fact:
+        framework: "{{ framework | default(cis_os_target_map[cis_os_target_key].framework) }}"
+        framework_version: "{{ framework_version | default(cis_os_target_map[cis_os_target_key].framework_version) }}"
+        opa_endpoint_path: "{{ opa_endpoint_path | default('/v1/data/' + cis_os_target_map[cis_os_target_key].framework + '/main/compliance_report') }}"
 
     - name: Compose OPA input (fact_contract/v1)
       ansible.builtin.set_fact:
