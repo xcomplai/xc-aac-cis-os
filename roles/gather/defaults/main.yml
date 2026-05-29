@@ -1,0 +1,10 @@
+---
+# Set to false to skip the package_facts step (slow on hosts with very large
+# package counts; some CIS controls require it though).
+cis_rhel9_gather_package_facts: true
+
+# Subset of CIS sections to gather. Empty list (default) = all.
+# Useful for incremental gather + targeted re-eval.
+# Valid keys: filesystem, ssh, audit, auth, services, network, pam, sudo,
+#             selinux, boot_security, logging, user_group, cron, initial_setup
+cis_rhel9_gather_sections: []

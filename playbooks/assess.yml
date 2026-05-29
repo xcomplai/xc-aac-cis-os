@@ -1,0 +1,120 @@
+---
+# xcomplai.cis_rhel9.assess — thin wrapper: gather → POST OPA → store PG.
+#
+# Per fact_contract/v1: gather sets framework_facts; this playbook composes
+# ansible_facts + framework_facts + metadata into the OPA input, queries OPA
+# at the cis_rhel9 endpoint, then writes results to the compliance_results
+# table.
+#
+# Today this playbook inlines the OPA query + PG store logic. When
+# xcomplai.aac_common.evaluate lands (Tier 3 follow-on), the include_role
+# step replaces the inline `uri` + `postgresql_query` tasks — same behaviour,
+# shared across all framework collections.
+#
+# Required extra-vars:
+#   opa_server_url           e.g. http://opa-security:8181 or http://aac-host:8181
+#   compliance_db_password   PostgreSQL postgres user password
+#
+# Optional:
+#   pg_host (default 'aac-host'), pg_port (5433), pg_db ('compliance')
+
+- name: CIS RHEL 9 — gather + assess
+  hosts: "{{ assess_hosts | default('all') }}"
+  gather_facts: true
+
+  vars:
+    framework: cis_rhel9
+    framework_version: '2.0.0'
+    collection_self: xcomplai.cis_rhel9
+    collection_self_version: '1.0.0'
+    opa_input_schema: fact_contract/v1
+    opa_endpoint_path: /v1/data/cis_rhel9/main/compliance_report
+    pg_table: compliance_results
+    pg_host: "{{ pg_host | default('aac-host') }}"
+    pg_port: "{{ pg_port | default(5433) }}"
+    pg_db: "{{ pg_db | default('compliance') }}"
+
+  tasks:
+    - name: Gather CIS RHEL 9 framework_facts
+      ansible.builtin.include_role:
+        name: gather
+
+    - name: Compose OPA input (fact_contract/v1)
+      ansible.builtin.set_fact:
+        opa_input:
+          schema: "{{ opa_input_schema }}"
+          input:
+            ansible_facts:
+              ansible_hostname: "{{ ansible_facts['hostname'] }}"
+              ansible_distribution: "{{ ansible_facts['distribution'] }}"
+              ansible_distribution_version: "{{ ansible_facts['distribution_version'] }}"
+              ansible_distribution_major_version: "{{ ansible_facts['distribution_major_version'] }}"
+              ansible_os_family: "{{ ansible_facts['os_family'] }}"
+              ansible_kernel: "{{ ansible_facts['kernel'] }}"
+              ansible_architecture: "{{ ansible_facts['architecture'] }}"
+              ansible_processor_cores: "{{ ansible_facts['processor_cores'] }}"
+              ansible_memtotal_mb: "{{ ansible_facts['memtotal_mb'] }}"
+              ansible_mounts: "{{ ansible_facts['mounts'] }}"
+              ansible_interfaces: "{{ ansible_facts['interfaces'] | default(['lo']) }}"
+              ansible_default_ipv4: "{{ ansible_facts['default_ipv4'] | default({}) }}"
+              ansible_selinux: "{{ ansible_facts['selinux'] | default({}) }}"
+              ansible_service_mgr: "{{ ansible_facts['service_mgr'] }}"
+            framework_facts: "{{ framework_facts }}"
+            metadata:
+              inventory_hostname: "{{ inventory_hostname }}"
+              framework: "{{ framework }}"
+              framework_version: "{{ framework_version }}"
+              collection: "{{ collection_self }}"
+              collection_version: "{{ collection_self_version }}"
+              gathered_at: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+    - name: Query OPA for compliance report
+      ansible.builtin.uri:
+        url: "{{ opa_server_url }}{{ opa_endpoint_path }}"
+        method: POST
+        body_format: json
+        body:
+          input: "{{ opa_input.input }}"
+        return_content: true
+        status_code: 200
+      register: opa_report
+      delegate_to: localhost
+      failed_when: false
+
+    - name: Show OPA result summary
+      ansible.builtin.debug:
+        msg:
+          - "OPA query → {{ opa_server_url }}{{ opa_endpoint_path }}"
+          - "HTTP {{ opa_report.status | default('?') }}"
+          - "Compliant: {{ opa_report.json.result.compliant | default('?') }}"
+          - "Violations: {{ opa_report.json.result.violations | default([]) | length }}"
+      when: opa_report.status | default(0) == 200
+
+    - name: Store compliance results in PostgreSQL
+      community.postgresql.postgresql_query:
+        login_host: "{{ pg_host }}"
+        login_port: "{{ pg_port }}"
+        login_user: postgres
+        login_password: "{{ compliance_db_password }}"
+        db: "{{ pg_db }}"
+        query: >-
+          INSERT INTO {{ pg_table }}
+            (hostname, framework, policy_name, policy_version,
+             compliant, violations, metadata, evaluation_timestamp)
+          VALUES
+            (%(hostname)s, %(framework)s, %(policy_name)s, %(policy_version)s,
+             %(compliant)s, %(violations)s::jsonb, %(metadata)s::jsonb, NOW())
+        named_args:
+          hostname: "{{ inventory_hostname }}"
+          framework: "{{ framework }}"
+          policy_name: "{{ collection_self }}"
+          policy_version: "{{ collection_self_version }}"
+          compliant: "{{ opa_report.json.result.compliant | default(false) }}"
+          violations: "{{ opa_report.json.result.violations | default([]) | to_json }}"
+          metadata: "{{ opa_input.input.metadata | to_json }}"
+      delegate_to: localhost
+      no_log: true
+      when:
+        - opa_report.status | default(0) == 200
+        - compliance_db_password is defined
+        - compliance_db_password | length > 0
